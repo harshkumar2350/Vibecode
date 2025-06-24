@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Mode Dino Game</title>
+    <style>
+        /* Base styles for the body to center content */
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh; /* Full viewport height */
+            background-color: #f0f0f0; /* Light grey background */
+            font-family: 'Courier New', Courier, monospace; /* Pixelated font style */
+            color: #535353; /* Dark grey text color */
+            overflow: hidden; /* Prevents scrollbars */
+            flex-direction: column; /* Stack canvas and buttons vertically */
+        }
+        /* Canvas styling - responsive sizing handled by JS */
+        canvas {
+            background-color: #f7f7f7; /* Light background for the game area */
+            border-bottom: 2px solid #d1d1d1; /* Ground line appearance */
+            display: block; /* Ensures canvas is a block element */
+        }
+        /* Container for game mode selection buttons */
+        #gameControls {
+            margin-top: 15px; /* Spacing above buttons */
+            display: flex; /* Use flexbox for button layout */
+            gap: 15px; /* Space between buttons */
+            flex-wrap: wrap; /* Allow buttons to wrap on smaller screens */
+            justify-content: center; /* Center buttons horizontally */
+            padding: 10px; /* Padding around buttons */
+        }
+        /* Styling for game mode buttons */
+        .mode-button {
+            padding: 12px 25px; /* Button padding */
+            font-size: 19px; /* Larger font size */
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #7a7a7a; /* Grey background */
+            color: white; /* White text */
+            border: none; /* No border */
+            border-radius: 10px; /* Rounded corners */
+            cursor: pointer; /* Pointer cursor on hover */
+            outline: none; /* No outline on focus */
+            transition: background-color 0.2s, transform 0.1s; /* Smooth transitions */
+            box-shadow: 0 5px 8px rgba(0, 0, 0, 0.2); /* Subtle shadow */
+            text-transform: uppercase; /* Uppercase text */
+            min-width: 150px; /* Minimum width for consistency */
+        }
+        .mode-button:hover {
+            background-color: #909090; /* Lighter grey on hover */
+            transform: translateY(-3px); /* Slight lift effect */
+        }
+        .mode-button:active {
+            background-color: #535353; /* Darker grey on click */
+            transform: translateY(0); /* Reset lift on click */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Smaller shadow on click */
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="gameControls">
+        <button class="mode-button" id="trexModeButton" data-mode="trex">T-Rex World</button>
+        <button class="mode-button" id="pterosaurModeButton" data-mode="pterosaur">Pterosaur World</button>
+        <button class="mode-button" id="plesiosaurusModeButton" data-mode="plesiosaurus">Plesiosaurus World</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Base game dimensions for consistent drawing regardless of canvas display size
+        const GAME_WIDTH = 800;
+        const GAME_HEIGHT = 400; // Keep the larger height for multi-mode flexibility
+        canvas.width = GAME_WIDTH;
+        canvas.height = GAME_HEIGHT;
+
+        // --- Global Game Variables ---
+        let startTime = 0; // Tracks when the current game started for score calculation
+        let animationFrameId; // Stores the ID returned by requestAnimationFrame for cancellation
+        let audioCtx; // AudioContext for Web Audio API to generate sounds
+
+        // Game states:
+        // 'menu': User is selecting a game mode
+        // 'start': Game mode selected, waiting for first input to start playing
+        // 'ready': Game is paused, waiting for input to continue (e.g., after game over)
+        // 'playing': Game is actively running
+        // 'gameOver': Game has ended, showing scores
+        let gameState = 'menu';
+        let currentMode = 'trex'; // Default game mode
+        let activeMode; // Reference to the currently active game mode instance
+
+        // --- Audio Functions ---
+        // Plays a simple sound using Web Audio API
+        function playSound(frequency, type, duration, volume = 0.2) {
+            // Initialize AudioContext on the first user interaction to comply with browser policies
+            if (!audioCtx) return; // Do nothing if audio context hasn't been initialized by user input
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            gainNode.gain.setValueAtTime(volume, audioCtx.currentTime); // Set initial volume
+
+            oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime); // Set pitch
+            oscillator.type = type; // Set waveform type (e.g., 'triangle', 'sawtooth')
+
+            // Fade out the sound to avoid clicks
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+
+            oscillator.start(audioCtx.currentTime); // Start playing now
+            oscillator.stop(audioCtx.currentTime + duration); // Stop after duration
+        }
+
+        function playJumpSound() {
+            playSound(350, 'square', 0.15, 0.08); // Updated to T-Rex jump sound
+        }
+
+        function playHitSound() {
+            playSound(160, 'sawtooth', 0.4, 0.2); // Updated to T-Rex hit sound
+        }
+
+        // --- Responsive Canvas Sizing ---
+        // Adjusts the canvas display size to fit the window while maintaining aspect ratio
+        function resizeCanvas() {
+            const aspectRatio = GAME_WIDTH / GAME_HEIGHT;
+            // Use 90% of window width and 80% of window height to leave space for controls
+            const availableWidth = window.innerWidth * 0.9;
+            const availableHeight = window.innerHeight * 0.8;
+
+            let finalWidth, finalHeight;
+
+            // Determine if width or height is the limiting factor
+            if (availableWidth / availableHeight > aspectRatio) {
+                // Window is wider than canvas, height is limiting
+                finalHeight = availableHeight;
+                finalWidth = finalHeight * aspectRatio;
+            } else {
+                // Window is taller than canvas, width is limiting
+                finalWidth = availableWidth;
+                finalHeight = finalWidth / aspectRatio;
+            }
+
+            canvas.style.width = `${finalWidth}px`;
+            canvas.style.height = `${finalHeight}px`;
+        }
+
+        // Event listener for window resizing
+        window.addEventListener('resize', resizeCanvas);
+
+
+        // --- Base GameMode Class ---
+        // All specific game modes will inherit from this class, providing a common interface
+        class GameMode {
+            constructor(modeName) {
+                this.modeName = modeName;
+                this.score = 0;
+                this.highScore = 0;
+                this.gravity = 0;
+                this.jump = 0;
+                this.gameSpeed = 0;
+                this.obstacles = [];
+                this.player = null; // Player object specific to this mode
+                this.timeToNextObstacle = 0; // Counter for obstacle spawning
+                this.minObstacleInterval = 0;
+                this.maxObstacleInterval = 0;
+            }
+
+            // Initializes or resets the mode's specific state
+            init() {
+                this.score = 0;
+                // Retrieve high score from local storage, defaulting to 0
+                this.highScore = parseInt(localStorage.getItem(`dinoGameHighScore_${this.modeName}`) || 0);
+                this.obstacles = [];
+                // Reset obstacle spawn timer for the start of a new game
+                this.timeToNextObstacle = Math.floor(Math.random() * (this.maxObstacleInterval - this.minObstacleInterval + 1)) + this.minObstacleInterval;
+                // Player-specific reset (to be handled in child class)
+            }
+
+            // Updates game logic common to all modes (e.g., score)
+            update() {
+                this.score = Math.floor((Date.now() - startTime) / 100);
+            }
+
+            // Draws common game elements (e.g., score display)
+            draw() {
+                ctx.fillStyle = '#535353'; // Text color
+                ctx.font = '20px "Courier New", Courier, monospace'; // Font style
+                ctx.textAlign = 'right'; // Align text to the right
+                // Get current high score for display
+                const currentHS = parseInt(localStorage.getItem(`dinoGameHighScore_${this.modeName}`) || 0);
+                // Display high score and current score, padded with leading zeros
+                ctx.fillText(`HI ${String(currentHS).padStart(5, '0')} ${String(this.score).padStart(5, '0')}`, GAME_WIDTH - 20, 30);
+            }
+
+            // Handles player input, to be overridden by specific modes
+            handleInput() {
+                // Placeholder
+            }
+
+            // Ends the current game
+            endGame() {
+                if (gameState === 'gameOver') return; // Prevent multiple calls if already game over
+                playHitSound(); // Play game over sound
+                gameState = 'gameOver'; // Set game state to game over
+                // Update high score if current score is higher
+                if (this.score > this.highScore) {
+                    this.highScore = this.score;
+                    localStorage.setItem(`dinoGameHighScore_${this.modeName}`, this.highScore);
+                }
+            }
+        }
+
+        // --- Pterosaur Mode (Flappy Bird style) ---
+        class PterosaurMode extends GameMode {
+            constructor() {
+                super('pterosaur'); // Call parent constructor with mode name
+                this.gravity = 0.25; // Slower fall speed for easier gameplay
+                this.jump = -6;    // Gentler jump for more control
+                this.gameSpeed = 2.5; // Slower obstacle movement
+                this.obstacleWidth = 52; // Width of cactus obstacles
+                this.gapHeight = 180; // Larger gap for easier passage
+                this.minObstacleInterval = 140; // Min frames between obstacles
+                this.maxObstacleInterval = 220; // Max frames between obstacles
+                this.flyingCreatureWidth = 40; // Width of flying bird obstacle
+                this.flyingCreatureHeight = 32; // Height of flying bird obstacle
+                this.obstacleSpawnCounter = 0; // Counter for spawning new obstacles
+
+                // Pterosaur Player Object
+                this.player = {
+                    x: 50,
+                    y: 200,
+                    width: 48,
+                    height: 32,
+                    velocityY: 0,
+                    wingFlapCounter: 0, // Counter for wing animation frames
+                    wingFlapState: 'down', // Current wing state ('down' or 'up')
+
+                    // Draws the pixelated pterosaur character
+                    draw() {
+                        ctx.save();
+                        // Make player semi-transparent when game is not playing
+                        if (gameState !== 'playing') {
+                            ctx.globalAlpha = 0.7;
+                        }
+                        ctx.fillStyle = '#535353'; // Pterosaur color
+
+                        // Animate wings by toggling state every few frames
+                        this.wingFlapCounter++;
+                        if (this.wingFlapCounter > 8) { // Adjust flap speed here
+                            this.wingFlapState = (this.wingFlapState === 'down') ? 'up' : 'down';
+                            this.wingFlapCounter = 0;
+                        }
+
+                        // Pterosaur Drawing (pixel art)
+                        // Body
+                        ctx.fillRect(this.x + 12, this.y + 16, 16, 12);
+
+                        // Head and beak
+                        ctx.fillRect(this.x + 28, this.y + 4, 12, 12); // Main head
+                        ctx.fillRect(this.x + 40, this.y + 8, 8, 4);  // Beak
+                        ctx.fillRect(this.x + 24, this.y, 8, 4); // Head crest back
+                        ctx.fillRect(this.x + 28, this.y - 4, 4, 8); // Head crest top
+
+                        // White eye
+                        ctx.fillStyle = '#f7f7f7'; // Eye color
+                        ctx.fillRect(this.x + 32, this.y + 8, 4, 4);
+
+                        ctx.fillStyle = '#535353'; // Restore pterosaur color
+
+                        // Wings drawn based on the current flap state
+                        if (this.wingFlapState === 'down') {
+                            // Wings down position
+                            ctx.fillRect(this.x, this.y + 8, 12, 8);
+                            ctx.fillRect(this.x + 4, this.y + 16, 8, 8);
+                            ctx.fillRect(this.x + 8, this.y + 24, 4, 4);
+                        } else {
+                            // Wings up position
+                            ctx.fillRect(this.x, this.y, 12, 8);
+                            ctx.fillRect(this.x + 4, this.y - 8, 8, 8);
+                            ctx.fillRect(this.x + 8, this.y - 12, 4, 4);
+                        }
+                        ctx.restore();
+                    },
+                    // Updates player's vertical position based on gravity
+                    update(gravity) {
+                        this.velocityY += gravity;
+                        this.y += this.velocityY;
+
+                        // Prevent player from going above the screen
+                        if (this.y < 0) {
+                            this.y = 0;
+                            this.velocityY = 0;
+                        }
+                    },
+                    // Makes the player "flap" upwards
+                    flap(jump) {
+                        this.velocityY = jump;
+                        playJumpSound(); // Play sound effect
+                    }
+                };
+            }
+
+            // Initializes/resets player state for a new game in this mode
+            init() {
+                super.init(); // Call parent init for score reset
+                this.player.y = 200; // Reset player position
+                this.player.velocityY = 0;
+                this.player.wingFlapCounter = 0;
+                this.player.wingFlapState = 'down';
+            }
+
+            // Draws a pixelated cactus
+            drawCactus(x, y, height) {
+                const bodyWidth = 24;
+                const bodyHeight = height - 12;
+                const armWidth = 14;
+                const armHeight = 30;
+                const startX = x + (this.obstacleWidth - bodyWidth) / 2;
+
+                ctx.fillStyle = '#535353'; // Cactus color
+                // Main stem
+                ctx.fillRect(startX, y, bodyWidth, bodyHeight);
+                // Arms
+                ctx.fillRect(startX - armWidth, y + 20, armWidth, armHeight);
+                ctx.fillRect(startX + bodyWidth, y + 20, armWidth, armHeight);
+                // Top
+                ctx.fillRect(x, y, this.obstacleWidth, 12);
+            }
+
+            // Draws a pixelated flying creature (bird)
+            drawFlyingCreature(creature) {
+                const x = creature.x;
+                const y = creature.y;
+                ctx.fillStyle = '#535353';
+
+                // Main Body
+                ctx.fillRect(x + 8, y + 8, 24, 16);
+
+                // Head and crest
+                ctx.fillRect(x + 28, y + 4, 8, 8); // Head
+                ctx.fillRect(x + 20, y, 8, 4);    // Crest part 1
+                ctx.fillRect(x + 16, y + 4, 4, 4);  // Crest part 2
+
+                // Lower body/tail
+                ctx.fillRect(x + 12, y + 24, 12, 4);
+                ctx.fillRect(x + 16, y + 28, 8, 4);
+
+                // Flapping Wing based on state
+                if (creature.wingFlapState === 'down') {
+                    // Left Wing (down)
+                    ctx.fillRect(x, y + 12, 8, 8);
+                    ctx.fillRect(x - 4, y + 16, 4, 4);
+
+                    // Right Wing (down)
+                    ctx.fillRect(x + 32, y + 12, 8, 4);
+
+                } else {
+                    // Left Wing (up)
+                    ctx.fillRect(x, y + 4, 8, 8);
+                    ctx.fillRect(x - 4, y + 8, 4, 4);
+
+                    // Right Wing (up)
+                    ctx.fillRect(x + 32, y + 8, 8, 4);
+                }
+            }
+
+            // Draws all active obstacles
+            drawObstacles() {
+                for (let i = 0; i < this.obstacles.length; i++) {
+                    const obs = this.obstacles[i];
+                    if (obs.type === 'cactus') {
+                        // Cacti come in pairs (top and bottom) to form a gap
+                        const topCactusHeight = obs.y;
+                        const bottomCactusY = obs.y + this.gapHeight;
+                        const bottomCactusHeight = GAME_HEIGHT - bottomCactusY;
+                        this.drawCactus(obs.x, bottomCactusY, bottomCactusHeight);
+                        // Draw top cactus mirrored
+                        ctx.save();
+                        ctx.translate(obs.x + this.obstacleWidth / 2, obs.y);
+                        ctx.scale(1, -1); // Flip vertically
+                        this.drawCactus(-this.obstacleWidth / 2, 0, topCactusHeight);
+                        ctx.restore();
+                    } else if (obs.type === 'flying') {
+                        this.drawFlyingCreature(obs);
+                    }
+                }
+            }
+
+            // Updates positions and handles spawning/removing of obstacles
+            updateObstacles() {
+                this.obstacleSpawnCounter++;
+                if (this.obstacleSpawnCounter >= this.timeToNextObstacle) {
+                    let obstacleType;
+                    // Introduce flying creatures after a certain score for variety
+                    if (this.score > 200 && Math.random() < 0.4) {
+                        obstacleType = 'flying';
+                    } else {
+                        obstacleType = 'cactus';
+                    }
+
+                    if (obstacleType === 'cactus') {
+                        // Randomize gap vertical position
+                        const gapY = Math.random() * (GAME_HEIGHT - this.gapHeight - 120) + 60;
+                        this.obstacles.push({ type: 'cactus', x: GAME_WIDTH, y: gapY, width: this.obstacleWidth, height: this.gapHeight });
+                    } else { // 'flying' type
+                        const creatureY = Math.random() * (GAME_HEIGHT - this.flyingCreatureHeight - 50) + 25; // Random height for flying creature
+                        this.obstacles.push({
+                            type: 'flying',
+                            x: GAME_WIDTH,
+                            y: creatureY,
+                            wingFlapCounter: Math.floor(Math.random() * 10), // Randomize start of flap cycle
+                            wingFlapState: 'down',
+                            width: this.flyingCreatureWidth, // For collision
+                            height: this.flyingCreatureHeight // For collision
+                        });
+                    }
+
+                    // Reset spawn timer
+                    this.timeToNextObstacle = Math.floor(Math.random() * (this.maxObstacleInterval - this.minObstacleInterval + 1)) + this.minObstacleInterval;
+                    this.obstacleSpawnCounter = 0; // Reset counter
+                }
+
+                // Iterate backwards to safely remove obstacles
+                for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                    const obs = this.obstacles[i];
+                    obs.x -= this.gameSpeed; // Move obstacle to the left
+
+                    // Animate flying creatures
+                    if (obs.type === 'flying') {
+                        obs.wingFlapCounter++;
+                        if (obs.wingFlapCounter > 10) {
+                            obs.wingFlapState = (obs.wingFlapState === 'down') ? 'up' : 'down';
+                            obs.wingFlapCounter = 0;
+                        }
+                    }
+
+                    // Collision detection with player (adjusted for pterosaur's drawing)
+                    const playerRect = {
+                        x: this.player.x + 12, // Adjusted X for pterosaur's body
+                        y: this.player.y,
+                        width: this.player.width - 12, // Adjusted width
+                        height: this.player.height
+                    };
+
+                    if (obs.type === 'cactus') {
+                        const topCactusBottom = obs.y;
+                        const bottomCactusTop = obs.y + this.gapHeight;
+
+                        // Check collision with top cactus
+                        if (playerRect.x < obs.x + obs.width &&
+                            playerRect.x + playerRect.width > obs.x &&
+                            playerRect.y < topCactusBottom) {
+                            this.endGame();
+                        }
+                        // Check collision with bottom cactus
+                        if (playerRect.x < obs.x + obs.width &&
+                            playerRect.x + playerRect.width > obs.x &&
+                            playerRect.y + playerRect.height > bottomCactusTop) {
+                            this.endGame();
+                        }
+                    } else if (obs.type === 'flying') {
+                        // Collision with flying creature
+                        if (playerRect.x < obs.x + obs.width &&
+                            playerRect.x + playerRect.width > obs.x &&
+                            playerRect.y < obs.y + obs.height &&
+                            playerRect.y + playerRect.height > obs.y) {
+                            this.endGame();
+                        }
+                    }
+
+                    // Remove off-screen obstacles
+                    if (obs.x + obs.width < 0) {
+                        this.obstacles.splice(i, 1);
+                    }
+                }
+            }
+
+            // Overall update logic for Pterosaur mode
+            update() {
+                super.update(); // Update score
+                this.player.update(this.gravity); // Update player position
+                this.updateObstacles(); // Update and handle obstacles
+
+                // Check for ground collision
+                if (this.player.y + this.player.height > GAME_HEIGHT) {
+                    this.player.y = GAME_HEIGHT - this.player.height;
+                    this.player.velocityY = 0;
+                    this.endGame(); // End game on ground hit
+                }
+            }
+
+            // Overall drawing logic for Pterosaur mode
+            draw() {
+                ctx.fillStyle = '#f7f7f7'; // Background color
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT); // Clear and fill background
+                ctx.fillStyle = '#d1d1d1';
+                ctx.fillRect(0, GAME_HEIGHT - 2, GAME_WIDTH, 2); // Ground line
+
+                this.player.draw(); // Draw player
+                this.drawObstacles(); // Draw obstacles
+                super.draw(); // Draw score
+            }
+
+            // Input handler for Pterosaur mode
+            handleInput() {
+                this.player.flap(this.jump); // Make the player flap
+            }
+        }
+
+        // --- T-Rex Mode (Chrome Dino style) ---
+        class TrexMode extends GameMode {
+            constructor() {
+                super('trex');
+                // T-Rex specific physics and speed
+                this.gravity = 0.6;
+                this.jump = -15; 
+                this.initialGameSpeed = 5;
+                this.gameSpeed = this.initialGameSpeed;
+                this.speedIncreaseFactor = 0.001; // How quickly the game speeds up
+
+                this.groundX = 0; // For parallax ground effect
+                this.groundSpeed = this.gameSpeed; // Ground moves at game speed
+
+                this.obstacleTypes = ['smallCactus', 'largeCactus', 'doubleCactus', 'bird'];
+                this.minObstacleInterval = 50;
+                this.maxObstacleInterval = 120;
+                this.timeToNextObstacle = Math.floor(Math.random() * (this.maxObstacleInterval - this.minObstacleInterval + 1)) + this.minObstacleInterval;
+
+                // T-Rex Player Object
+                this.player = {
+                    x: 50,
+                    // Dimensions based on pixel art at 2x scale (24x24 original pixels)
+                    width: 48, 
+                    height: 48, 
+                    y: GAME_HEIGHT - 48 - 2, // Initial Y position based on height and ground
+                    velocityY: 0,
+                    isJumping: false,
+                    runFrame: 0, // Toggles between 0 and 1 for animation
+                    frameCounter: 0,
+                    pixelSize: 2, // Multiplier for drawing pixels larger on canvas
+
+                    // Draws the T-Rex using simple rectangles based on the reference image
+                    draw: function(gameSpeedParam) { // Added gameSpeedParam
+                        ctx.save();
+                        if (gameState !== 'playing') {
+                            ctx.globalAlpha = 0.7; // Make player semi-transparent when game is not playing
+                        }
+                        ctx.fillStyle = '#535353'; // T-Rex color
+                        const s = this.pixelSize; // Scale factor to draw the pixel art larger
+
+                        // Update animation frame based on frameCounter and game speed
+                        if (!this.isJumping) {
+                            this.frameCounter++;
+                            if (this.frameCounter > (10 / (gameSpeedParam / 5))) { // Use gameSpeedParam
+                                this.runFrame = (this.runFrame + 1) % 2;
+                                this.frameCounter = 0;
+                            }
+                        }
+
+                        // Drawing logic for the T-Rex (pixel by pixel using fillRect)
+                        // Head
+                        ctx.fillRect(this.x + 13*s, this.y + 0*s, 11*s, 1*s);
+                        ctx.fillRect(this.x + 12*s, this.y + 1*s, 1*s, 1*s);
+                        ctx.fillRect(this.x + 13*s, this.y + 1*s, 9*s, 8*s);
+                        ctx.fillRect(this.x + 22*s, this.y + 2*s, 1*s, 4*s);
+
+                        // Eye (white part)
+                        ctx.fillStyle = '#f7f7f7';
+                        ctx.fillRect(this.x + 15*s, this.y + 3*s, 2*s, 2*s);
+                        ctx.fillStyle = '#535353'; // Restore T-Rex color
+
+                        // Body
+                        ctx.fillRect(this.x + 8*s, this.y + 9*s, 7*s, 8*s);
+                        ctx.fillRect(this.x + 7*s, this.y + 10*s, 1*s, 7*s);
+                        ctx.fillRect(this.x + 6*s, this.y + 11*s, 1*s, 6*s);
+
+                        // Arm
+                        ctx.fillRect(this.x + 14*s, this.y + 10*s, 1*s, 3*s);
+                        ctx.fillRect(this.x + 13*s, this.y + 11*s, 1*s, 1*s);
+
+                        // Tail
+                        ctx.fillRect(this.x + 5*s, this.y + 12*s, 1*s, 4*s);
+                        ctx.fillRect(this.x + 4*s, this.y + 13*s, 1*s, 3*s);
+                        ctx.fillRect(this.x + 3*s, this.y + 14*s, 1*s, 2*s);
+                        ctx.fillRect(this.x + 2*s, this.y + 15*s, 1*s, 2*s);
+                        ctx.fillRect(this.x + 1*s, this.y + 16*s, 1*s, 2*s);
+                        ctx.fillRect(this.x + 0*s, this.y + 17*s, 1*s, 2*s);
+
+                        // Legs - animate based on runFrame or if jumping
+                        if (this.isJumping) {
+                            // Jumping state (legs together)
+                            ctx.fillRect(this.x + 8*s, this.y + 17*s, 1*s, 4*s);
+                            ctx.fillRect(this.x + 7*s, this.y + 21*s, 2*s, 1*s);
+                            ctx.fillRect(this.x + 12*s, this.y + 17*s, 1*s, 4*s);
+                            ctx.fillRect(this.x + 11*s, this.y + 21*s, 2*s, 1*s);
+                        } else if (this.runFrame === 0) {
+                            // Running frame 0 (both legs down for this simplified anim)
+                            ctx.fillRect(this.x + 8*s, this.y + 17*s, 1*s, 4*s);
+                            ctx.fillRect(this.x + 7*s, this.y + 21*s, 2*s, 1*s);
+                            ctx.fillRect(this.x + 12*s, this.y + 17*s, 1*s, 4*s);
+                            ctx.fillRect(this.x + 11*s, this.y + 21*s, 2*s, 1*s);
+                        } else {
+                            // Running frame 1 (one leg up, one down)
+                            ctx.fillRect(this.x + 8*s, this.y + 17*s, 1*s, 3*s);
+                            ctx.fillRect(this.x + 7*s, this.y + 20*s, 2*s, 1*s);
+                            ctx.fillRect(this.x + 12*s, this.y + 17*s, 1*s, 2*s);
+                            ctx.fillRect(this.x + 11*s, this.y + 19*s, 2*s, 1*s);
+                        }
+                        ctx.restore();
+                    },
+                    // Updates the player's state each frame
+                    update: function(gravity, groundY) { 
+                        // Apply gravity if in the air
+                        if(this.isJumping){
+                            this.velocityY += gravity;
+                            this.y += this.velocityY;
+                        }
+
+                        // Ground check
+                        if (this.y >= groundY - this.height) {
+                            this.y = groundY - this.height;
+                            this.velocityY = 0;
+                            this.isJumping = false;
+                        }
+                    },
+                    // Makes the player jump
+                    jump: function(jumpStrength) {
+                        // Can only jump if on the ground
+                        if (!this.isJumping) {
+                            this.velocityY = jumpStrength;
+                            this.isJumping = true;
+                            playJumpSound();
+                        }
+                    }
+                };
+            }
+
+            // Initializes/resets player and obstacle state for a new T-Rex game
+            init() {
+                super.init();
+                this.score = 0; // Reset score for the new game
+                this.gameSpeed = this.initialGameSpeed; // Reset game speed
+                this.player.y = GAME_HEIGHT - this.player.height - 2; // Position on ground
+                this.player.velocityY = 0;
+                this.player.isJumping = false;
+                this.player.runFrame = 0;
+                this.player.frameCounter = 0;
+                this.obstacles = [];
+                this.groundX = 0; // Reset ground parallax
+                this.timeToNextObstacle = Math.floor(Math.random() * (this.maxObstacleInterval - this.minObstacleInterval + 1)) + this.minObstacleInterval;
+            }
+
+            // Draws the moving ground line and texture inspired by Chrome Dino
+            drawGround() {
+                const groundY = GAME_HEIGHT - 2; // Y position of the ground line
+                ctx.fillStyle = '#d1d1d1';
+                ctx.fillRect(0, groundY, GAME_WIDTH, 2); // Main ground line
+
+                // Simple moving ground texture (sparse pixelated dots/lines)
+                ctx.fillStyle = '#a0a0a0'; // Darker grey for ground texture
+                const dotSize = 2; // Size of each dot/pixel
+                const spacing = 15; // Spacing between dot groups
+
+                for (let i = 0; i < GAME_WIDTH / spacing + 2; i++) {
+                    const currentX = (i * spacing + this.groundX) % GAME_WIDTH;
+                    if (currentX > -dotSize) { // Only draw if visible on screen
+                        // Draw a small cluster of dots/pixels for texture
+                        ctx.fillRect(currentX, groundY - 10 + Math.random() * 5, dotSize, dotSize);
+                        ctx.fillRect(currentX + dotSize * 2, groundY - 5 + Math.random() * 5, dotSize, dotSize);
+                    }
+                }
+
+                // Update ground position for parallax
+                this.groundX -= this.groundSpeed;
+                if (this.groundX <= -spacing) { // Reset when one segment goes off screen
+                    this.groundX = 0;
+                }
+            }
+
+            // Draws a pixelated cactus (single, large, or double)
+            drawCactus(x, type) {
+                ctx.fillStyle = '#535353'; // Cactus color
+                const pixelSize = this.player.pixelSize; // Use player's pixelSize for consistency
+
+                // Pixel art data for cacti (Original Chrome Dino game dimensions, then scaled by pixelSize)
+                const smallCactusSprite = [
+                    [0,1,1,1,0],
+                    [1,1,1,1,1],
+                    [1,1,1,1,1],
+                    [0,1,1,1,0],
+                    [0,1,1,1,0],
+                    [0,1,1,1,0],
+                    [0,1,1,1,0],
+                    [0,1,1,1,0],
+                    [0,1,1,1,0],
+                    [0,1,1,1,0],
+                    [0,1,1,1,0],
+                    [0,1,1,1,0]
+                ]; // 5x12 pixels
+
+                const largeCactusSprite = [
+                    [0,0,1,1,1,0,0],
+                    [0,1,1,1,1,1,0],
+                    [1,1,1,1,1,1,1],
+                    [1,1,1,1,1,1,1],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0],
+                    [0,1,1,1,1,1,0]
+                ]; // 7x18 pixels
+
+                const doubleCactusSprite = [
+                    [0,1,1,1,0,0,0,1,1,1,0],
+                    [1,1,1,1,1,0,1,1,1,1,1],
+                    [1,1,1,1,1,1,1,1,1,1,1],
+                    [0,1,1,1,0,1,1,1,1,1,0],
+                    [0,1,1,1,0,0,1,1,1,0,0],
+                    [0,1,1,1,0,0,1,1,1,0,0],
+                    [0,1,1,1,0,0,1,1,1,0,0],
+                    [0,1,1,1,0,0,1,1,1,0,0],
+                    [0,1,1,1,0,0,1,1,1,0,0],
+                    [0,1,1,1,0,0,1,1,1,0,0],
+                    [0,1,1,1,0,0,1,1,1,0,0],
+                    [0,1,1,1,0,0,1,1,1,0,0]
+                ]; // 11x12 pixels (approx, manual count of filled)
+
+                let spriteToDraw;
+                if (type === 'smallCactus') {
+                    spriteToDraw = smallCactusSprite;
+                } else if (type === 'largeCactus') {
+                    spriteToDraw = largeCactusSprite;
+                } else if (type === 'doubleCactus') {
+                    spriteToDraw = doubleCactusSprite;
+                }
+
+                // Calculate Y position based on sprite height to sit on the ground
+                const yPos = GAME_HEIGHT - spriteToDraw.length * pixelSize - 2; // -2 for ground line thickness
+                this.drawSprite(x, yPos, spriteToDraw, pixelSize);
+            }
+
+            // Generic function to draw a sprite based on a 2D array of pixels
+            drawSprite(startX, startY, sprite, pixelSize = 1) {
+                for (let y = 0; y < sprite.length; y++) {
+                    for (let x = 0; x < sprite[y].length; x++) {
+                        if (sprite[y][x] === 1) {
+                            ctx.fillRect(startX + x * pixelSize, startY + y * pixelSize, pixelSize, pixelSize);
+                        }
+                    }
+                }
+            }
+
+            // Draws a pixelated flying bird (pterodactyl-like)
+            drawBird(bird) {
+                ctx.fillStyle = '#535353';
+                const x = bird.x;
+                const y = bird.y;
+                const pixelSize = this.player.pixelSize; // Consistent pixel size for obstacles
+
+                // Bird flapping animation
+                bird.animationCounter++;
+                if (bird.animationCounter >= bird.animationSpeed) {
+                    bird.animationFrame = (bird.animationFrame + 1) % 2; // 2 frames for bird animation
+                    bird.animationCounter = 0;
+                }
+                
+                // --- Accurate bird pixel art (from external source, simplified to fit) ---
+                const birdUpSprite = [
+                    [0,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1],
+                    [1,1,1,1,0,0,0,0,0,0,0,0,0,1,1,1,1],
+                    [0,1,1,1,1,0,0,0,0,0,0,0,1,1,1,1,1],
+                    [0,0,1,1,1,1,0,0,0,0,0,1,1,1,1,1],
+                    [0,0,0,1,1,1,1,0,0,0,1,1,1,1,1,0],
+                    [0,0,0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+                    [0,0,0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+                    [0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+                    [0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0]
+                ];
+
+                const birdDownSprite = [
+                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                    [0,0,0,0,1,1,1,1,1,1,1,1,1,1,0,0],
+                    [0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0],
+                    [0,0,1,1,1,1,0,0,0,0,0,1,1,1,1,1],
+                    [0,1,1,1,1,0,0,0,0,0,0,0,1,1,1,1,1],
+                    [1,1,1,1,0,0,0,0,0,0,0,0,0,1,1,1,1],
+                    [0,1,1,0,0,0,0,0,0,0,0,0,0,0,1,1]
+                ];
+
+                if (bird.animationFrame === 0) {
+                    this.drawSprite(x, y, birdUpSprite, pixelSize); 
+                } else {
+                    this.drawSprite(x, y, birdDownSprite, pixelSize); 
+                }
+            }
+
+            // Draws all active obstacles
+            drawObstacles() {
+                for (let i = 0; i < this.obstacles.length; i++) {
+                    const obs = this.obstacles[i];
+                    if (obs.type.includes('cactus')) {
+                        this.drawCactus(obs.x, obs.type); // Pass the full type string
+                    } else if (obs.type === 'bird') {
+                        this.drawBird(obs);
+                    }
+                }
+            }
+
+            // Updates positions and handles spawning/removing of obstacles
+            updateObstacles() {
+                this.timeToNextObstacle--;
+                if (this.timeToNextObstacle <= 0) {
+                    // Randomly choose between cactus or bird
+                    let newObstacleType;
+                    const randomVal = Math.random();
+                    if (this.score < 150 || randomVal < 0.7) { // Only spawn cacti before score 150
+                        const cactusTypeIndex = Math.floor(Math.random() * 3); // 0, 1, 2 for small, large, double
+                        newObstacleType = ['smallCactus', 'largeCactus', 'doubleCactus'][cactusTypeIndex];
+                    } else { // 30% chance for bird after score 150
+                        newObstacleType = 'bird';
+                    }
+
+                    let obsWidth, obsHeight, obsY;
+                    const pixelSize = this.player.pixelSize;
+
+                    // Determine dimensions based on sprite to set collision box
+                    if (newObstacleType === 'smallCactus') {
+                        obsWidth = 5 * pixelSize; 
+                        obsHeight = 12 * pixelSize; 
+                        obsY = GAME_HEIGHT - obsHeight - 2;
+                    } else if (newObstacleType === 'largeCactus') {
+                        obsWidth = 7 * pixelSize; 
+                        obsHeight = 18 * pixelSize; 
+                        obsY = GAME_HEIGHT - obsHeight - 2;
+                    } else if (newObstacleType === 'doubleCactus') {
+                        obsWidth = 11 * pixelSize; 
+                        obsHeight = 12 * pixelSize; 
+                        obsY = GAME_HEIGHT - obsHeight - 2;
+                    } else if (newObstacleType === 'bird') {
+                        obsWidth = 16 * pixelSize; // Bird sprite width (original)
+                        obsHeight = 10 * pixelSize; // Bird sprite height (original)
+                        const birdHeights = [
+                            GAME_HEIGHT - this.player.height - 2, // Low flight (just above ground)
+                            GAME_HEIGHT - this.player.height - 30, // Mid flight
+                            GAME_HEIGHT - this.player.height - 60  // High flight
+                        ];
+                        obsY = birdHeights[Math.floor(Math.random() * birdHeights.length)];
+                    }
+
+                    this.obstacles.push({
+                        type: newObstacleType,
+                        x: GAME_WIDTH,
+                        y: obsY, 
+                        width: obsWidth,
+                        height: obsHeight,
+                        animationFrame: 0, 
+                        animationSpeed: 10, 
+                        animationCounter: 0 
+                    });
+
+                    // Reset spawn timer
+                    this.timeToNextObstacle = Math.floor(Math.random() * (this.maxObstacleInterval - this.minObstacleInterval + 1)) + this.minObstacleInterval;
+                }
+
+                // Iterate backwards to safely remove obstacles
+                for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                    const obs = this.obstacles[i];
+                    obs.x -= this.gameSpeed; // Move obstacle left
+
+                    // Update bird animation
+                    if (obs.type === 'bird') {
+                        obs.animationCounter++;
+                        if (obs.animationCounter >= obs.animationSpeed) {
+                            obs.animationFrame = (obs.animationFrame + 1) % 2;
+                            obs.animationCounter = 0;
+                        }
+                    }
+
+                    // Collision detection for T-Rex (simple rectangular collision)
+                    const playerRect = {
+                        x: this.player.x,
+                        y: this.player.y,
+                        width: this.player.width,
+                        height: this.player.height
+                    };
+
+                    if (playerRect.x < obs.x + obs.width &&
+                        playerRect.x + playerRect.width > obs.x &&
+                        playerRect.y < obs.y + obs.height &&
+                        playerRect.y + playerRect.height > obs.y) {
+                        this.endGame(); // End game on collision
+                    }
+
+                    // Remove off-screen obstacles
+                    if (obs.x + obs.width < 0) {
+                        this.obstacles.splice(i, 1);
+                    }
+                }
+            }
+
+            // Overall update logic for T-Rex mode
+            update() {
+                // Score and speed increase
+                this.score = Math.floor((Date.now() - startTime) / 100); 
+                this.gameSpeed += this.speedIncreaseFactor; // Increase speed over time
+
+                const groundY = GAME_HEIGHT - 2; // Ground line Y position
+                this.player.update(this.gravity, groundY); // Update player, pass ground Y
+                this.updateObstacles(); // Update and handle obstacles
+                this.groundSpeed = this.gameSpeed; // Keep ground speed synced
+            }
+
+            // Overall drawing logic for T-Rex mode
+            draw() {
+                ctx.fillStyle = '#f7f7f7'; // Background color
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT); // Clear and fill background
+
+                this.drawGround(); // Draw moving ground
+                this.player.draw(this.gameSpeed); // Pass gameSpeed to player.draw()
+                this.drawObstacles(); // Draw obstacles
+                super.draw(); // Draw score
+            }
+
+            // Input handler for T-Rex mode
+            handleInput() {
+                this.player.jump(this.jump); // Make the T-Rex jump
+            }
+        }
+
+        // --- Plesiosaurus Mode (Underwater Flappy Bird style) ---
+        class PlesiosaurusMode extends GameMode {
+            constructor() {
+                super('plesiosaurus');
+                this.gravity = 0.12; // Lighter gravity for a swimming feel
+                this.swimStrength = -4; // Gentler swim strength
+                this.gameSpeed = 2; // Slowest speed for underwater environment
+                this.jellyfishWidth = 40; // Width of jellyfish
+                this.jellyfishHeight = 50; // Height of jellyfish
+                this.minObstacleInterval = 160;
+                this.maxObstacleInterval = 260;
+                this.spikeHeight = 10; // The height of the dangerous spikes on the ground
+                this.timeToNextObstacle = Math.floor(Math.random() * (this.maxObstacleInterval - this.minObstacleInterval + 1)) + this.minObstacleInterval;
+                
+                // Properties for water particles
+                this.particles = [];
+                this.numParticles = 50;
+                this.playerBubbles = [];
+                this.bubbleEmitCounter = 0;
+
+
+                // Plesiosaurus Player Object
+                this.player = {
+                    x: 60,
+                    y: GAME_HEIGHT / 2, // Start in middle of water
+                    width: 70, // Wider body for plesiosaurus
+                    height: 40,
+                    velocityY: 0,
+                    flipperFlapCounter: 0, // Counter for flipper animation
+                    flipperState: 'down', // Flipper state ('down' or 'up')
+
+                    // Draws the pixelated Plesiosaurus character
+                    draw() {
+                        ctx.save();
+                        if (gameState !== 'playing') {
+                            ctx.globalAlpha = 0.7;
+                        }
+                        const mainColor = '#535353'; // Standard dark grey color
+
+                        // Animate flippers
+                        this.flipperFlapCounter++;
+                        if (this.flipperFlapCounter > 12) {
+                            this.flipperState = this.flipperState === 'down' ? 'up' : 'down';
+                            this.flipperFlapCounter = 0;
+                        }
+                        
+                        // Body
+                        ctx.fillStyle = mainColor;
+                        ctx.beginPath();
+                        ctx.ellipse(this.x + 25, this.y + 20, 25, 12, 0, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Neck
+                        ctx.fillRect(this.x + 45, this.y + 10, 8, 15);
+                        
+                        // Head
+                        ctx.beginPath();
+                        ctx.ellipse(this.x + 52, this.y + 5, 8, 6, 0, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Eye - "cut out" from the head using the background color
+                        ctx.fillStyle = '#e8eef2'; 
+                        ctx.fillRect(this.x + 54, this.y + 3, 2, 2);
+
+                        // Tail
+                        ctx.fillStyle = mainColor;
+                        ctx.beginPath();
+                        ctx.moveTo(this.x, this.y + 20);
+                        ctx.lineTo(this.x - 15, this.y + 15);
+                        ctx.lineTo(this.x - 15, this.y + 25);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        // Flippers
+                        if (this.flipperState === 'down') {
+                            // Top Flipper
+                            ctx.fillRect(this.x + 15, this.y, 20, 8);
+                            // Bottom Flipper
+                            ctx.fillRect(this.x + 15, this.y + 32, 20, 8);
+                        } else {
+                            // Top Flipper
+                            ctx.fillRect(this.x + 20, this.y + 4, 20, 8);
+                            // Bottom Flipper
+                            ctx.fillRect(this.x + 20, this.y + 28, 20, 8);
+                        }
+
+                        ctx.restore();
+                    },
+                    // Updates player's vertical position based on gravity and swim strength
+                    update(gravity) {
+                        this.velocityY += gravity;
+                        this.y += this.velocityY;
+
+                        // Prevent from going out of water boundaries (top only)
+                        if (this.y < 0) {
+                            this.y = 0;
+                            this.velocityY = 0;
+                        }
+                    },
+                    // Makes the player "swim" upwards
+                    swim(swimStrength) {
+                        this.velocityY = swimStrength;
+                        playSound(250, 'sine', 0.1, 0.1);
+                    }
+                };
+            }
+
+            // Initializes/resets player and obstacle state for a new Plesiosaurus game
+            init() {
+                super.init();
+                this.player.y = GAME_HEIGHT / 2; // Reset player to center of screen
+                this.player.velocityY = 0;
+                this.playerBubbles = [];
+                
+                // Initialize particles for the underwater effect
+                this.particles = [];
+                for (let i = 0; i < this.numParticles; i++) {
+                    this.particles.push({
+                        x: Math.random() * GAME_WIDTH,
+                        y: Math.random() * GAME_HEIGHT,
+                        size: Math.random() * 2 + 1, // size between 1 and 3
+                        speedX: (Math.random() * 0.5 + 0.2) * -1, // slow drift to the left
+                        speedY: (Math.random() * 0.4 - 0.2) // slow vertical drift
+                    });
+                }
+            }
+
+            // Draws the underwater background and spikes
+            drawWaterBackground() {
+                // Fill background with a light grey-blue color
+                ctx.fillStyle = '#e8eef2';
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+                
+                // Draw spikes on the ground
+                ctx.fillStyle = '#535353'; // A dark, dangerous color for spikes
+                const spikeWidth = 20; // The base width of each spike
+                const numSpikes = Math.ceil(GAME_WIDTH / spikeWidth);
+
+                for (let i = 0; i < numSpikes; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(i * spikeWidth, GAME_HEIGHT); // Bottom-left corner of spike
+                    ctx.lineTo(i * spikeWidth + (spikeWidth / 2), GAME_HEIGHT - this.spikeHeight); // Tip of the spike
+                    ctx.lineTo((i + 1) * spikeWidth, GAME_HEIGHT); // Bottom-right corner of spike
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+
+            // Draws the ambient water particles
+            drawParticles() {
+                ctx.fillStyle = 'rgba(83, 83, 83, 0.4)'; // semi-transparent dark grey
+                for (let i = 0; i < this.particles.length; i++) {
+                    const p = this.particles[i];
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Draws the bubbles released by the player
+            drawPlayerBubbles() {
+                for (let i = 0; i < this.playerBubbles.length; i++) {
+                    const b = this.playerBubbles[i];
+                    ctx.fillStyle = `rgba(83, 83, 83, ${b.opacity * 0.5})`; // Use semi-transparent grey
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            
+            // Updates the position of ambient water particles
+            updateParticles() {
+                for(let i = 0; i < this.particles.length; i++) {
+                    const p = this.particles[i];
+                    p.x += p.speedX;
+                    p.y += p.speedY;
+                    
+                    // Reset particle if it moves off the left of the screen
+                    if (p.x < -p.size) {
+                        p.x = GAME_WIDTH + p.size;
+                        p.y = Math.random() * GAME_HEIGHT;
+                    }
+                    
+                    // If particle drifts off top or bottom, reset it
+                     if (p.y < -p.size) {
+                        p.y = GAME_HEIGHT + p.size;
+                        p.x = Math.random() * GAME_WIDTH;
+                    } else if (p.y > GAME_HEIGHT + p.size) {
+                        p.y = -p.size;
+                        p.x = Math.random() * GAME_WIDTH;
+                    }
+                }
+            }
+
+            // Updates the position and state of player-released bubbles
+            updatePlayerBubbles() {
+                // Periodically emit a bubble from the player's mouth area
+                this.bubbleEmitCounter++;
+                if (this.bubbleEmitCounter > 35) { // every 35 frames
+                    this.bubbleEmitCounter = 0;
+                    this.playerBubbles.push({
+                        x: this.player.x + 60, // Start near the head
+                        y: this.player.y + 10,
+                        size: Math.random() * 3 + 2, // Random size
+                        speedY: (Math.random() * 1 + 0.5) * -1, // Move up
+                        opacity: 1
+                    });
+                }
+
+                // Update existing bubbles
+                for (let i = this.playerBubbles.length - 1; i >= 0; i--) {
+                    const b = this.playerBubbles[i];
+                    b.y += b.speedY; // Move bubble up
+                    b.opacity -= 0.02; // Fade out
+
+                    // Remove bubble if it's fully faded
+                    if (b.opacity <= 0) {
+                        this.playerBubbles.splice(i, 1);
+                    }
+                }
+            }
+
+
+            // Draws a pixelated jellyfish obstacle
+            drawJellyfish(jellyfish) {
+                const x = jellyfish.x;
+                const y = jellyfish.y;
+                const width = jellyfish.width;
+                const height = jellyfish.height;
+                const color = '#535353';
+
+                // Bell
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(x + width / 2, y + height / 3, width / 2, Math.PI, 0);
+                ctx.closePath();
+                ctx.fill();
+
+                // Tentacles
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                for (let i = 0; i < 4; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + (i + 1) * width / 5, y + height / 3);
+                    ctx.quadraticCurveTo(
+                        x + (i + 1) * width / 5 + (Math.sin(Date.now() * 0.01 + i) * 10), y + height * 0.8,
+                        x + (i + 1) * width / 5, y + height
+                    );
+                    ctx.stroke();
+                }
+            }
+
+            // Draws all active obstacles
+            drawObstacles() {
+                for (let i = 0; i < this.obstacles.length; i++) {
+                    const obs = this.obstacles[i];
+                    this.drawJellyfish(obs);
+                }
+            }
+
+            // Updates positions and handles spawning/removing of obstacles
+            updateObstacles() {
+                this.timeToNextObstacle--;
+                if (this.timeToNextObstacle <= 0) {
+                    const obsY = Math.random() * (GAME_HEIGHT - this.jellyfishHeight - 40 - this.spikeHeight) + 20; // Ensure jellyfish don't spawn in spikes
+                    this.obstacles.push({ x: GAME_WIDTH, y: obsY, width: this.jellyfishWidth, height: this.jellyfishHeight });
+                    // Reset spawn timer
+                    this.timeToNextObstacle = Math.floor(Math.random() * (this.maxObstacleInterval - this.minObstacleInterval + 1)) + this.minObstacleInterval;
+                }
+
+                // Iterate backwards to safely remove obstacles
+                for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                    const obs = this.obstacles[i];
+                    obs.x -= this.gameSpeed; // Move jellyfish left
+
+                    // Collision detection for Plesiosaurus
+                    const playerRect = {
+                        x: this.player.x,
+                        y: this.player.y,
+                        width: this.player.width,
+                        height: this.player.height
+                    };
+
+                    if (playerRect.x < obs.x + obs.width &&
+                        playerRect.x + playerRect.width > obs.x &&
+                        playerRect.y < obs.y + obs.height &&
+                        playerRect.y + playerRect.height > obs.y) {
+                        this.endGame(); // End game on collision
+                    }
+
+                    // Remove off-screen obstacles
+                    if (obs.x + obs.width < 0) {
+                        this.obstacles.splice(i, 1);
+                    }
+                }
+            }
+
+            // Overall update logic for Plesiosaurus mode
+            update() {
+                super.update(); // Update score
+                this.player.update(this.gravity); // Update player position
+                this.updateObstacles(); // Update and handle obstacles
+                this.updateParticles(); // Update particle positions
+                this.updatePlayerBubbles(); // Update player bubble positions
+                
+                // Check for ground collision with spikes
+                if (this.player.y + this.player.height > GAME_HEIGHT - this.spikeHeight) {
+                    this.endGame();
+                }
+            }
+
+            // Overall drawing logic for Plesiosaurus mode
+            draw() {
+                this.drawWaterBackground(); // Draw water background and spikes
+                this.drawParticles(); // Draw the ambient particles
+                this.player.draw(); // Draw plesiosaurus
+                this.drawPlayerBubbles(); // Draw the bubbles from the player
+                this.drawObstacles(); // Draw obstacles
+                super.draw(); // Draw score
+            }
+
+            // Input handler for Plesiosaurus mode
+            handleInput() {
+                this.player.swim(this.swimStrength); // Make the player swim
+            }
+        }
+
+        // --- Game Manager Setup ---
+        // Create instances of each game mode
+        const gameModes = {
+            'trex': new TrexMode(),
+            'pterosaur': new PterosaurMode(),
+            'plesiosaurus': new PlesiosaurusMode()
+        };
+        // Set the initially active mode
+        activeMode = gameModes[currentMode];
+
+        // Clears the entire canvas (each mode then draws its specific background)
+        function clearCanvas() {
+            ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        }
+
+        // Draws the main start screen for a selected mode
+        function drawStartScreen() {
+            // First, draw the mode's background and player
+            activeMode.draw(); 
+            // Then draw the text over it
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0,0,GAME_WIDTH, GAME_HEIGHT);
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.textAlign = 'center';
+            ctx.font = '30px "Courier New", Courier, monospace';
+            ctx.fillText(`Welcome to the ${activeMode.modeName.toUpperCase()} World!`, GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40);
+            ctx.font = '20px "Courier New", Courier, monospace'; 
+            ctx.fillText('Click or Press Space to Start', GAME_WIDTH / 2, GAME_HEIGHT / 2);
+        }
+
+        // Draws the "Click or Press Space to Flap!" message
+        function drawReadyScreen() {
+             activeMode.draw(); // Draw the current game state first
+            // Then draw the text over it
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0,0,GAME_WIDTH, GAME_HEIGHT);
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.textAlign = 'center';
+            ctx.font = '20px "Courier New", Courier, monospace';
+            ctx.fillText('Click or Press Space to Flap/Jump/Swim!', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 40);
+        }
+
+        // Draws the game over screen with scores
+        function drawGameOverScreen() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.75)'; // Semi-transparent overlay
+            ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT); // Cover screen
+            ctx.fillStyle = '#FFFFFF';
+            ctx.textAlign = 'center';
+            ctx.font = '40px "Courier New", Courier, monospace';
+            ctx.fillText('GAME OVER', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 60);
+            ctx.font = '20px "Courier New", Courier, monospace';
+            ctx.fillText(`Score: ${activeMode.score}`, GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20);
+            ctx.fillText(`High Score: ${activeMode.highScore}`, GAME_WIDTH / 2, GAME_HEIGHT / 2 + 10);
+            ctx.fillText('Click or Press Space to Replay', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50);
+        }
+
+        // Main game loop, called repeatedly via requestAnimationFrame
+        function gameLoop() {
+            clearCanvas(); // Always clear canvas at the start of the frame
+
+            if (gameState === 'playing') {
+                activeMode.update(); // Update logic for the current mode
+                activeMode.draw();   // Draw elements for the current mode
+            } else if (gameState === 'gameOver') {
+                activeMode.draw(); // Draw the last state of the game
+                drawGameOverScreen(); // Overlay game over screen
+            } else if (gameState === 'ready' || gameState === 'start') {
+                activeMode.draw(); // Draw player and environment (no movement)
+                 if (gameState === 'start') {
+                    drawStartScreen();
+                }
+            } else if (gameState === 'menu') {
+                drawMenuScreen(); // Draw the mode selection menu
+            }
+            animationFrameId = requestAnimationFrame(gameLoop); // Request next frame
+        }
+
+        // Draws the initial menu screen to choose a mode
+        function drawMenuScreen() {
+            ctx.fillStyle = '#f7f7f7'; // Background for menu
+            ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+            ctx.fillStyle = '#535353';
+            ctx.textAlign = 'center';
+            ctx.font = '40px "Courier New", Courier, monospace';
+            ctx.fillText('Choose Your World', GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40);
+            ctx.font = '20px "Courier New", Courier, monospace';
+            ctx.fillText('Use the buttons below!', GAME_WIDTH / 2, GAME_HEIGHT / 2 + 10);
+        }
+
+        // Starts the actual gameplay for the current mode
+        function startGame() {
+            activeMode.init(); // Initialize the active mode (resets score, player position etc.)
+            startTime = Date.now(); // Record game start time
+            gameState = 'playing'; // Set game state to playing
+        }
+
+        // Central input handler for mouse click, tap, and spacebar
+        function handleInput() {
+            // Initialize AudioContext on the first user interaction to comply with browser autoplay policies
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            if (gameState === 'start' || gameState === 'ready') {
+                startGame(); // Start the game
+                activeMode.handleInput(); // Perform the first jump/flap/swim
+            } else if (gameState === 'playing') {
+                activeMode.handleInput(); // Perform jump/flap/swim during gameplay
+            } else if (gameState === 'gameOver') {
+                activeMode.init(); // Reset game state for replay
+                gameState = 'start'; // Go to ready screen for next round
+            }
+        }
+
+        // Keyboard input handler
+        function handleKeyPress(e) {
+            // Check for spacebar or equivalent key code
+            if (e.code === 'Space' || e.key === ' ') {
+                e.preventDefault(); // Prevent default spacebar action (e.g., scrolling)
+                // Only process input if not in the main menu
+                if (gameState !== 'menu') {
+                    handleInput();
+                }
+            }
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('keydown', handleKeyPress);
+
+        // Mouse click handler
+        canvas.addEventListener('mousedown', (e) => {
+             // Only process input if not in menu state
+            if (gameState !== 'menu') {
+                e.preventDefault(); // Prevent default mouse actions
+                handleInput();
+            }
+        });
+
+        // Touch input handler
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent default touch actions (e.g., scrolling, zooming)
+            // Only process input if not in menu state
+            if (gameState !== 'menu') {
+                handleInput();
+            }
+        });
+
+        // --- Mode selection button handlers ---
+        document.querySelectorAll('.mode-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const newMode = button.dataset.mode;
+                if (currentMode !== newMode || gameState === 'menu') {
+                     cancelAnimationFrame(animationFrameId); // Stop current game loop
+                    currentMode = newMode;
+                    activeMode = gameModes[currentMode]; // Set new active mode
+                    activeMode.init(); // Initialize the new mode
+                    gameState = 'start'; // Go to start screen for the new mode
+                    gameLoop(); // Restart the game loop
+                }
+            });
+        });
+
+        // --- Initial Setup ---
+        resizeCanvas(); // Set initial canvas size
+        gameLoop();      // Start the game loop (initially in 'menu' state)
+    </script>
+</body>
+</html>

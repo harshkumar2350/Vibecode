@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Amount Entry</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Google Sans', sans-serif;
+            background-color: #f0f2f5; /* A more neutral background */
+        }
+        .btn:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.5);
+        }
+        .pay-button-disabled {
+            background-color: #E0E0E0 !important;
+            color: #A0A0A0 !important;
+            cursor: not-allowed;
+        }
+        .note-input::placeholder {
+            color: #7f8c8d;
+        }
+        .note-input:focus {
+            border-color: #4285F4;
+            outline: none;
+        }
+        .numpad-btn {
+             background-color: #f8f9fa;
+             color: #202124;
+        }
+        .numpad-btn-operator {
+            background-color: #f1f3f4;
+            color: #202124;
+        }
+        .numpad-btn-action {
+            background-color: #e8f0fe;
+            color: #1967d2;
+        }
+        #confetti-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allows clicks to pass through */
+            z-index: 100;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+
+    <!-- Mobile Screen Simulator -->
+    <div id="payment-screen" class="w-full max-w-sm h-[844px] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+        
+        <!-- Header -->
+        <header class="p-4 flex items-center justify-between flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            <div class="text-center">
+                 <p class="font-medium text-gray-900">Paying Rohit Kapoor</p>
+                 <p class="text-sm text-gray-500">+91 00000-00000</p>
+            </div>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
+        </header>
+        
+        <!-- Amount Display -->
+        <main class="flex-grow flex flex-col items-center justify-center px-6 text-center">
+            <div id="expression-display" class="h-8 text-2xl text-gray-400 font-light truncate w-full"></div>
+            <div class="flex items-baseline">
+                <span class="text-5xl font-bold text-gray-800">₹</span>
+                <span id="result-display" class="text-7xl font-bold text-[#1d192b] ml-2">0</span>
+            </div>
+             <input type="text" id="note-input" placeholder="Add a note" class="note-input mt-4 bg-transparent border-b border-gray-300 text-center text-lg w-3/4 focus:w-full transition-all duration-300">
+        </main>
+        
+        <!-- Numpad -->
+        <footer class="flex-shrink-0 p-4 bg-gray-200 rounded-t-3xl">
+             <div class="flex justify-end mb-4">
+                 <button id="pay-button" class="btn flex items-center justify-center h-14 w-20 bg-blue-600 text-white rounded-2xl font-medium transition-all pay-button-disabled">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                 </button>
+             </div>
+            <div class="grid grid-cols-4 gap-2">
+                <!-- Numpad Buttons -->
+                <button data-key="1" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">1</button>
+                <button data-key="2" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">2</button>
+                <button data-key="3" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">3</button>
+                <button data-key="-" class="btn text-3xl h-16 numpad-btn-operator rounded-2xl active:bg-gray-300">-</button>
+                <button data-key="4" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">4</button>
+                <button data-key="5" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">5</button>
+                <button data-key="6" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">6</button>
+                <button data-key="+" class="btn text-3xl h-16 numpad-btn-operator rounded-2xl active:bg-gray-300">+</button>
+                <button data-key="7" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">7</button>
+                <button data-key="8" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">8</button>
+                <button data-key="9" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">9</button>
+                <button data-key="backspace" class="btn flex items-center justify-center h-16 numpad-btn-action rounded-2xl active:bg-blue-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 002.828 0L21 12M3 12l6.414-6.414a2 2 0 012.828 0L21 12" /></svg></button>
+                <button data-key="," class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">,</button>
+                <button data-key="0" class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">0</button>
+                <button data-key="." class="btn text-3xl h-16 numpad-btn rounded-2xl active:bg-gray-200">.</button>
+                <button data-key="confirm" class="btn flex items-center justify-center text-3xl font-bold h-16 numpad-btn-action rounded-2xl active:bg-blue-200">✓</button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Success Screen (Initially Hidden) -->
+    <div id="success-screen" class="hidden relative w-full max-w-sm h-[844px] bg-white rounded-3xl shadow-2xl flex flex-col items-center justify-center text-center p-8">
+        <canvas id="confetti-canvas"></canvas>
+        
+        <!-- Icon Container -->
+        <div class="relative z-10 flex items-center justify-center w-24 h-24">
+            <!-- The ping animation (behind) -->
+            <div class="absolute inline-flex h-full w-full rounded-full bg-blue-200 opacity-75 animate-ping"></div>
+            <!-- The actual icon (on top) -->
+            <div class="relative inline-flex rounded-full h-24 w-24 bg-blue-500 text-white items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </div>
+        </div>
+
+        <div id="success-details" class="relative z-10 opacity-0 transition-opacity duration-1000 mt-16">
+            <h2 class="text-3xl font-bold text-gray-800 mt-8">Payment Successful!</h2>
+            <p class="text-gray-600 mt-2 text-lg">₹<span id="final-amount">150</span>.00 paid to Rohit Kapoor</p>
+            <p class="text-sm text-gray-500 mt-4" id="timestamp"></p>
+            <button id="new-payment-button" class="mt-8 px-8 py-3 bg-blue-600 text-white rounded-full font-medium">New Payment</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Elements ---
+            const expressionDisplay = document.getElementById('expression-display');
+            const resultDisplay = document.getElementById('result-display');
+            const payButton = document.getElementById('pay-button');
+            const numpad = document.querySelector('footer');
+            const paymentScreen = document.getElementById('payment-screen');
+            const successScreen = document.getElementById('success-screen');
+            const successDetails = document.getElementById('success-details');
+            const newPaymentButton = document.getElementById('new-payment-button');
+            const finalAmountDisplay = document.getElementById('final-amount');
+            const timestampDisplay = document.getElementById('timestamp');
+
+            // --- State Variables ---
+            let expression = '';
+            let currentNumber = '0';
+            let committedResult = 0;
+            let isTotaled = false;
+
+            // --- Confetti Logic ---
+            const confettiCanvas = document.getElementById('confetti-canvas');
+            const ctx = confettiCanvas.getContext('2d');
+            let particles = [];
+            const confettiColors = ['#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3', '#03a9f4', '#00bcd4', '#009688', '#4caf50', '#8bc34a', '#cddc39', '#ffeb3b', '#ffc107', '#ff9800'];
+            let animationFrameId;
+
+            const launchConfetti = () => {
+                confettiCanvas.width = confettiCanvas.offsetWidth;
+                confettiCanvas.height = confettiCanvas.offsetHeight;
+                particles = [];
+                for (let i = 0; i < 100; i++) {
+                    particles.push({
+                        x: confettiCanvas.width / 2,
+                        y: confettiCanvas.height / 3,
+                        size: Math.random() * 5 + 5,
+                        color: confettiColors[Math.floor(Math.random() * confettiColors.length)],
+                        vx: Math.random() * 10 - 5,
+                        vy: Math.random() * -20 - 5, // Burst upwards initially
+                        opacity: 1,
+                        gravity: 0.3,
+                    });
+                }
+                animateConfetti();
+            };
+
+            const animateConfetti = () => {
+                ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+                particles.forEach((p, index) => {
+                    p.vy += p.gravity;
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.opacity -= 0.01;
+
+                    if (p.opacity <= 0) {
+                        particles.splice(index, 1);
+                    } else {
+                        ctx.globalAlpha = p.opacity;
+                        ctx.fillStyle = p.color;
+                        ctx.fillRect(p.x, p.y, p.size, p.size);
+                    }
+                });
+
+                if (particles.length > 0) {
+                    animationFrameId = requestAnimationFrame(animateConfetti);
+                } else {
+                    ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+                }
+            };
+            
+            const safeEval = (expr) => {
+                if (!expr || typeof expr !== 'string') return 0;
+                let evalExpr = expr.trim();
+                if (['+', '-'].includes(evalExpr.slice(-1))) { evalExpr = evalExpr.slice(0, -1); }
+                if (evalExpr === '') return 0;
+                if (!/^[0-9.+\-\s]+$/.test(evalExpr)) { return 0; }
+                try {
+                    return new Function('return ' + evalExpr.replace(/--/g, '+').replace(/\+-/g, '-'))();
+                } catch(e) { return 0; }
+            };
+            
+            const triggerPayment = () => {
+                const finalValue = isTotaled ? committedResult : safeEval(expression + (currentNumber !== '0' ? currentNumber : '0'));
+                if (finalValue <= 0) return;
+                
+                finalAmountDisplay.textContent = finalValue.toLocaleString('en-IN');
+                timestampDisplay.textContent = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+                
+                paymentScreen.classList.add('hidden');
+                successScreen.classList.remove('hidden');
+                successDetails.classList.add('opacity-0');
+                
+                launchConfetti();
+                
+                setTimeout(() => {
+                    successDetails.classList.remove('opacity-0');
+                }, 500); // Fade in details after 0.5s
+            };
+
+            const updateDisplay = () => {
+                expressionDisplay.textContent = expression.replace(/\s/g, '') + (currentNumber !== '0' ? currentNumber : '');
+                resultDisplay.textContent = currentNumber !== '0' ? currentNumber : committedResult.toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits:2});
+                
+                const len = resultDisplay.textContent.length;
+                resultDisplay.className = `text-[#1d192b] ml-2 font-bold ${len > 8 ? 'text-5xl' : 'text-7xl'}`;
+
+                let finalPotentialValue = isTotaled ? committedResult : safeEval(expression + (currentNumber !== '0' ? currentNumber : '0'));
+                payButton.disabled = finalPotentialValue <= 0;
+                payButton.classList.toggle('pay-button-disabled', payButton.disabled);
+            };
+            
+            const handleKeyPress = (key) => {
+                if (key === 'confirm') {
+                    if (isTotaled) {
+                        triggerPayment();
+                    } else {
+                        const finalValue = safeEval(expression + (currentNumber !== '0' ? currentNumber : '0'));
+                        expression = '';
+                        currentNumber = '0';
+                        committedResult = finalValue;
+                        isTotaled = true;
+                    }
+                } else {
+                    if(isTotaled && '0123456789'.includes(key)){
+                         // Start new calculation after a total
+                         resetCalculator(false);
+                    } else {
+                        isTotaled = false;
+                    }
+
+                    if ('0123456789'.includes(key)) {
+                        if (currentNumber.length > 9) return; 
+                        currentNumber = (currentNumber === '0') ? key : currentNumber + key;
+                    } else if (key === '.' || key === ',') {
+                        if (!currentNumber.includes('.')) { currentNumber += '.'; }
+                    } else if ('+-'.includes(key)) {
+                        if (currentNumber !== '0' && currentNumber !== '' && !currentNumber.endsWith('.')) {
+                            committedResult = safeEval(expression + currentNumber);
+                            expression += currentNumber + key;
+                            currentNumber = '0';
+                        } else if (expression.length > 0 && '+-'.includes(expression.slice(-1))) {
+                            expression = expression.slice(0, -1) + key;
+                        }
+                    } else if (key === 'backspace') {
+                        if (currentNumber !== '0') {
+                            currentNumber = currentNumber.slice(0, -1) || '0';
+                        } else if (expression.length > 0) {
+                            expression = expression.slice(0, -1);
+                            const lastNumMatch = expression.match(/[\d.]*$/);
+                            if (lastNumMatch && lastNumMatch[0]) {
+                                const lastNum = lastNumMatch[0];
+                                expression = expression.slice(0, -lastNum.length);
+                                currentNumber = lastNum;
+                                committedResult = safeEval(expression);
+                            }
+                        }
+                    }
+                }
+                updateDisplay();
+            };
+
+            const resetCalculator = (fullReset = true) => {
+                expression = '';
+                currentNumber = '0';
+                committedResult = 0;
+                isTotaled = false;
+                if (fullReset) {
+                    document.getElementById('note-input').value = '';
+                    paymentScreen.classList.remove('hidden');
+                    successScreen.classList.add('hidden');
+                    successDetails.classList.add('opacity-0');
+                    cancelAnimationFrame(animationFrameId);
+                    ctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+                }
+                updateDisplay();
+            };
+
+            numpad.addEventListener('click', (e) => {
+                const button = e.target.closest('button');
+                if (button && button.dataset.key) {
+                    handleKeyPress(button.dataset.key);
+                }
+            });
+
+            payButton.addEventListener('click', triggerPayment);
+            newPaymentButton.addEventListener('click', () => resetCalculator(true));
+
+            updateDisplay();
+        });
+    </script>
+</body>
+</html>
